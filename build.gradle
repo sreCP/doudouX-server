@@ -1,0 +1,37 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.2.0'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.doudou'
+version = '0.1.0'
+
+java {
+    // 直接用当前 JDK 编译，不让 Gradle 去下载 toolchain（用户环境是 Java 25）
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    // Spring Boot 4 的 starter-web 不再默认带 Jackson，代理解析 SSE JSON 需要显式引入
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    runtimeOnly 'org.xerial:sqlite-jdbc:3.49.1.0'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

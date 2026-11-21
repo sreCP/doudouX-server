@@ -1,0 +1,24 @@
+# ---- Gradle ----
+.gradle/
+build/
+out/
+
+# ---- 运行时数据 ----
+# data/traces.db 里存的是真实对话请求体与模型原始回复，属于本地数据，不进仓库
+data/
+*.db
+*.db.bak*
+*.db-wal
+*.db-shm
+
+# ---- IDE ----
+.idea/
+*.iml
+.vscode/
+*.ipr
+*.iws
+
+# ---- 系统与日志 ----
+.DS_Store
+Thumbs.db
+*.log

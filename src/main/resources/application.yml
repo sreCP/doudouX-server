@@ -1,0 +1,25 @@
+server:
+  # 绑定所有网卡，App 才能通过局域网 IP 访问
+  address: 0.0.0.0
+  port: 8080
+
+spring:
+  application:
+    name: doudouX-server
+  datasource:
+    url: jdbc:sqlite:${DOUDOU_SERVER_DB:./data/traces.db}
+    driver-class-name: org.sqlite.JDBC
+    hikari:
+      maximum-pool-size: 1
+      connection-timeout: 5000
+
+# 单表存 trace，不做 ORM：schema 稳定、查询简单、零额外依赖
+doudou:
+  # trace 现在会记录请求正文与原始回复，单条可达数百 KB：
+  # 条数默认调小，并额外用总字节上限兜底（先按条数、再按体积淘汰最旧）。
+  max-traces: 5000
+  max-total-mb: 512
+  # 上游 LLM（OpenAI 兼容）。App 只连本网关，由网关转发并记 trace。
+  # 手机实测时这里要写电脑在局域网里的地址，不能用 127.0.0.1（那是网关自己）。
+  llm-base-url: ${OLLAMA_BASE_URL:http://192.168.1.6:11434/v1}
+  connect-timeout-seconds: 10

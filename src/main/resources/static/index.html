@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DoudouX Server · 实时 Trace 看板</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --surface: #ffffff; --border: #e5e3dd;
+    --text: #2c2c2a; --muted: #6b6a64; --accent: #0f6e56;
+    --danger: #a32d2d; --ok: #0f6e56; --warn: #ba7517;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 14px; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border);
+           padding: 12px 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 16px; font-weight: 500; }
+  .status { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 5px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.up { background: var(--ok); animation: pulse 2s infinite; }
+  .dot.down { background: var(--danger); }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+  .spacer { flex: 1; }
+  main { padding: 18px 20px 40px; max-width: 1240px; margin: 0 auto; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .toolbar input, .toolbar select { padding: 7px 10px; border: 1px solid var(--border);
+     border-radius: 8px; background: var(--surface); color: var(--text); font-size: 13px; }
+  button { padding: 7px 13px; border: 1px solid var(--border); border-radius: 8px;
+           background: var(--surface); color: var(--text); cursor: pointer; font-size: 13px; }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+  .card .label { color: var(--muted); font-size: 12px; }
+  .card .value { font-size: 22px; margin-top: 5px; font-weight: 500; }
+  .card .value small { font-size: 12px; color: var(--muted); font-weight: 400; }
+  .section-title { font-size: 14px; font-weight: 500; margin: 22px 0 10px; display: flex; align-items: center; gap: 8px; }
+  .section-title .hint { font-size: 12px; color: var(--muted); font-weight: 400; }
+  table { width: 100%; border-collapse: collapse; background: var(--surface);
+          border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th { background: #fbfaf8; color: var(--muted); font-weight: 500; white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  tbody tr.data-row { cursor: pointer; }
+  tbody tr.data-row:hover { background: #fbfaf8; }
+  tbody tr.fresh { animation: flash 1.6s ease-out; }
+  @keyframes flash { from { background: #E1F5EE } to { background: transparent } }
+  .ok { color: var(--ok); } .fail { color: var(--danger); } .warn { color: var(--warn); }
+  .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  .muted { color: var(--muted); }
+  .ctx-total { font-weight: 500; font-size: 13px; }
+  .ctx-parts { font-size: 11px; color: var(--muted); margin-top: 1px; white-space: nowrap; }
+  .legend { font-size: 12px; color: var(--muted); margin: -4px 0 8px; }
+  .legend b { font-weight: 500; color: var(--text); }
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 5px; font-size: 11px;
+           background: #f1efe8; color: var(--muted); }
+  .badge.has { background: #E1F5EE; color: var(--ok); }
+  /* 详情抽屉 */
+  #drawerMask { position: fixed; inset: 0; background: rgba(0,0,0,.18); display: none; z-index: 40; }
+  #drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(720px, 92vw); background: var(--surface);
+            border-left: 1px solid var(--border); transform: translateX(100%); transition: transform .22s ease;
+            z-index: 50; display: flex; flex-direction: column; }
+  #drawer.open { transform: translateX(0); }
+  #drawerHead { padding: 14px 18px; border-bottom: 1px solid var(--border);
+                display: flex; align-items: center; gap: 10px; }
+  #drawerHead h2 { margin: 0; font-size: 15px; font-weight: 500; }
+  #drawerBody { flex: 1; overflow: auto; padding: 16px 18px 30px; }
+  .kv { display: grid; grid-template-columns: 110px 1fr; gap: 4px 12px; font-size: 13px; margin-bottom: 16px; }
+  .kv .k { color: var(--muted); }
+  .block { margin-top: 16px; }
+  .block-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .block-head .t { font-size: 13px; font-weight: 500; }
+  pre { margin: 0; padding: 12px; background: #fbfaf8; border: 1px solid var(--border);
+        border-radius: 8px; white-space: pre-wrap; word-break: break-all;
+        font-family: ui-monospace, Consolas, monospace; font-size: 12px; line-height: 1.55;
+        max-height: 42vh; overflow: auto; }
+  /* JSON / SSE 着色：一次线性扫描产生 token 类，颜色区分键、值、数字与思考内容 */
+  .j-key { color: #185FA5; }
+  .j-str { color: #3B6D11; }
+  .j-num { color: #993C1D; }
+  .j-think { color: #7F77DD; }
+  .j-content { color: #0F6E56; }
+  .j-note { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>DoudouX Server</h1>
+  <span class="status"><span class="dot" id="dot"></span><span id="statusText">连接中…</span></span>
+  <span class="spacer"></span>
+  <button id="btnPause">暂停实时</button>
+  <button id="btnRefresh">刷新历史</button>
+</header>
+
+<main>
+  <div class="cards" id="cards"></div>
+
+  <div class="section-title">实时调用 <span class="hint" id="liveHint">等待新 trace…</span></div>
+  <div class="legend">上下文分层：<b>系</b>=系统提示 · <b>工</b>=工具定义 · <b>忆</b>=记忆召回 · <b>摘</b>=滚动摘要 · <b>史</b>=历史消息（鼠标悬停看全称）</div>
+  <table id="liveTable">
+    <thead><tr><th>时间</th><th>模型</th><th>轮次</th><th>上下文 token</th><th>工具</th><th>结束</th><th>延迟</th><th>结果</th><th>正文</th></tr></thead>
+    <tbody><tr><td colspan="9" class="muted">暂无数据</td></tr></tbody>
+  </table>
+
+  <div class="section-title">按模型汇总（Eval 基线）</div>
+  <table id="statsTable">
+    <thead><tr><th>模型</th><th>调用数</th><th>失败</th><th>平均上下文 token</th><th>平均延迟</th><th>丢弃</th></tr></thead>
+    <tbody><tr><td colspan="6" class="muted">加载中…</td></tr></tbody>
+  </table>
+</main>
+
+<div id="drawerMask"></div>
+<aside id="drawer">
+  <div id="drawerHead">
+    <h2 id="drawerTitle">Trace 详情</h2>
+    <span class="spacer"></span>
+    <button id="btnCloseDrawer">关闭</button>
+  </div>
+  <div id="drawerBody"></div>
+</aside>
+
+<script>
+const MAX_ROWS = 300;
+let paused = false;
+let rowCount = 0;
+
+function fmtTime(ts) {
+  const d = new Date(ts);
+  const p = n => String(n).padStart(2, '0');
+  return `${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function fmtBytes(n) {
+  if (!n) return '—';
+  return n >= 1024 ? (n / 1024).toFixed(1) + 'KB' : n + 'B';
+}
+function fmtNum(n) {
+  return (n == null ? 0 : n).toLocaleString('zh-CN');
+}
+
+function setStatus(up, text) {
+  const dot = document.getElementById('dot');
+  dot.classList.toggle('up', up);
+  dot.classList.toggle('down', !up);
+  document.getElementById('statusText').textContent = text;
+}
+
+function renderRow(t, fresh) {
+  const body = document.querySelector('#liveTable tbody');
+  if (body.querySelector('td[colspan]')) body.innerHTML = '';
+  const tr = document.createElement('tr');
+  tr.className = 'data-row' + (fresh ? ' fresh' : '');
+  tr.onclick = () => openDetail(t.id);
+  const hasBody = (t.requestBodyLength || t.responseRawLength);
+  const ctxTotal = (t.sys || 0) + (t.tool || 0) + (t.mem || 0) + (t.sum || 0) + (t.hist || 0);
+  const ctxTitle = `系统提示 ${t.sys} · 工具定义 ${t.tool} · 记忆召回 ${t.mem} · 滚动摘要 ${t.sum} · 历史消息 ${t.hist}`;
+  tr.innerHTML = `
+    <td class="mono">${fmtTime(t.ts)}</td>
+    <td>${esc(t.model)}</td>
+    <td>${t.round}</td>
+    <td title="${esc(ctxTitle)}">
+      <div class="ctx-total">${fmtNum(ctxTotal)}</div>
+      <div class="ctx-parts">系${t.sys} · 工${t.tool} · 忆${t.mem} · 摘${t.sum} · 史${t.hist}</div>
+    </td>
+    <td>${esc(t.calls || '—')}</td>
+    <td class="${t.finish === 'cancel' ? 'warn' : ''}">${esc(t.finish)}</td>
+    <td>${t.ms} ms</td>
+    <td class="${t.ok ? 'ok' : 'fail'}">${t.ok ? '成功' : '失败'}</td>
+    <td><span class="badge ${hasBody ? 'has' : ''}">${hasBody ? fmtBytes(t.requestBodyLength) + ' / ' + fmtBytes(t.responseRawLength) : '无'}</span></td>`;
+  body.insertBefore(tr, body.firstChild);
+  rowCount++;
+  while (body.children.length > MAX_ROWS) body.removeChild(body.lastChild);
+}
+
+function loadHistory() {
+  const limit = 50;
+  fetch('/api/traces?limit=' + limit).then(r => r.json()).then(data => {
+    const body = document.querySelector('#liveTable tbody');
+    body.innerHTML = '';
+    rowCount = 0;
+    const rows = data.traces || [];
+    if (!rows.length) { body.innerHTML = '<tr><td colspan="9" class="muted">暂无数据</td></tr>'; return; }
+    rows.slice().reverse().forEach(t => renderRow(t, false));
+  }).catch(e => console.warn('加载历史失败', e));
+}
+
+function loadStats() {
+  fetch('/api/stats').then(r => r.json()).then(data => {
+    const groups = data.groups || [];
+    const total = groups.reduce((s, g) => s + g.count, 0);
+    const fails = groups.reduce((s, g) => s + g.failures, 0);
+    const avgMs = total ? Math.round(groups.reduce((s, g) => s + g.avgLatencyMs * g.count, 0) / total) : 0;
+    document.getElementById('cards').innerHTML = `
+      <div class="card"><div class="label">总调用数</div><div class="value">${total}</div></div>
+      <div class="card"><div class="label">失败数</div><div class="value ${fails ? 'fail' : ''}">${fails}</div></div>
+      <div class="card"><div class="label">平均延迟</div><div class="value">${avgMs}<small> ms</small></div></div>
+      <div class="card"><div class="label">本页显示</div><div class="value">${rowCount}<small> 条</small></div></div>`;
+    const body = document.querySelector('#statsTable tbody');
+    if (!groups.length) { body.innerHTML = '<tr><td colspan="6" class="muted">暂无数据</td></tr>'; return; }
+    body.innerHTML = groups.map(g => `<tr>
+      <td>${esc(g.model)}</td><td>${g.count}</td>
+      <td class="${g.failures ? 'fail' : ''}">${g.failures}</td>
+      <td>${Math.round(g.avgContextTokens)}</td><td>${Math.round(g.avgLatencyMs)} ms</td><td>${g.dropped}</td>
+    </tr>`).join('');
+  }).catch(e => console.warn('加载汇总失败', e));
+}
+
+function openDetail(id) {
+  if (!id) return;
+  const drawer = document.getElementById('drawer');
+  const mask = document.getElementById('drawerMask');
+  document.getElementById('drawerTitle').textContent = 'Trace #' + id;
+  document.getElementById('drawerBody').innerHTML = '<p class="muted">加载中…</p>';
+  drawer.classList.add('open');
+  mask.style.display = 'block';
+
+  fetch('/api/traces/' + id).then(r => r.json()).then(d => {
+    const req = pretty(d.requestBody);
+    const res = pretty(d.responseRaw);
+    document.getElementById('drawerBody').innerHTML = `
+      <div class="kv">
+        <div class="k">时间</div><div>${fmtTime(d.ts)}</div>
+        <div class="k">模型</div><div>${esc(d.model)}</div>
+        <div class="k">结束原因</div><div>${esc(d.finish)}</div>
+        <div class="k">耗时</div><div>${d.ms} ms</div>
+        <div class="k">结果</div><div class="${d.ok ? 'ok' : 'fail'}">${d.ok ? '成功' : '失败'}</div>
+        ${d.err ? `<div class="k">错误</div><div class="fail">${esc(d.err)}</div>` : ''}
+      </div>
+      <div class="block">
+        <div class="block-head"><span class="t">请求正文（发给 LLM）</span>
+          <button onclick="copyText('reqBody')">复制</button>
+          <span class="muted">${(d.requestBody || '').length} 字符</span></div>
+        <pre id="reqBody">${highlight(req)}</pre>
+      </div>
+      <div class="block">
+        <div class="block-head"><span class="t">原始回复（SSE）</span>
+          <button onclick="copyText('resBody')">复制</button>
+          <span class="muted">${(d.responseRaw || '').length} 字符</span></div>
+        <pre id="resBody">${highlight(res)}</pre>
+      </div>`;
+  }).catch(e => {
+    document.getElementById('drawerBody').innerHTML =
+      '<p class="fail">加载详情失败：' + esc(e.message) + '</p>';
+  });
+}
+
+function pretty(text) {
+  if (!text) return '（无记录）';
+  const t = text.trim();
+  // SSE 原始流以 data: 开头，不是单个 JSON，直接原样返回，省掉一次必然失败的解析
+  if (!t.startsWith('{') && !t.startsWith('[')) return text;
+  try { return JSON.stringify(JSON.parse(t), null, 2); }
+  catch (e) { return text; }
+}
+
+/**
+ * 轻量 JSON / SSE 着色：单次线性扫描，不做逐帧解析。
+ * 识别 key、字符串、数字、true/false/null；顺带把 reasoning、content 的值染成不同颜色，
+ * 这样"思考"和"正文"能区分开，但开销只比纯文本多一轮正则。
+ */
+const HIGHLIGHT_LIMIT = 1024 * 1024;
+function highlight(text) {
+  if (!text) return '';
+  if (text.length > HIGHLIGHT_LIMIT) {
+    return esc(text) + '\n<span class="j-note">（内容超过 1MB，已关闭逐词着色以保证滚动流畅）</span>';
+  }
+  const re = /("(?:\\u[0-9a-fA-F]{4}|\\[^u]|[^\\"])*")(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
+  let out = '';
+  let last = 0;
+  let pendingKey = null;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    out += esc(text.slice(last, m.index));
+    if (m[1] !== undefined) {
+      if (m[2] !== undefined) {
+        pendingKey = m[1].slice(1, -1);
+        out += '<span class="j-key">' + esc(m[1]) + '</span>' + esc(m[2]);
+      } else {
+        let cls = 'j-str';
+        if (pendingKey === 'reasoning' || pendingKey === 'reasoning_content') cls = 'j-think';
+        else if (pendingKey === 'content') cls = 'j-content';
+        out += '<span class="' + cls + '">' + esc(m[1]) + '</span>';
+        pendingKey = null;
+      }
+    } else if (m[3] !== undefined) {
+      out += '<span class="j-num">' + esc(m[3]) + '</span>';
+      pendingKey = null;
+    } else if (m[4] !== undefined) {
+      out += '<span class="j-num">' + esc(m[4]) + '</span>';
+      pendingKey = null;
+    }
+    last = m.index + m[0].length;
+  }
+  out += esc(text.slice(last));
+  return out;
+}
+
+function copyText(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  navigator.clipboard.writeText(el.textContent).then(
+    () => alert('已复制'), () => alert('复制失败，请手动选择'));
+}
+
+function closeDrawer() {
+  document.getElementById('drawer').classList.remove('open');
+  document.getElementById('drawerMask').style.display = 'none';
+}
+
+function connect() {
+  const es = new EventSource('/api/stream');
+  es.addEventListener('ready', () => {
+    setStatus(true, '实时推送已连接');
+    document.getElementById('liveHint').textContent = '有新调用会自动出现在最上方';
+  });
+  es.addEventListener('trace', e => {
+    if (paused) return;
+    try {
+      const t = JSON.parse(e.data);
+      renderRow(t, true);
+      loadStats();
+    } catch (err) { console.warn('解析推送失败', err); }
+  });
+  es.onerror = () => {
+    setStatus(false, '推送断开，正在重连…');
+  };
+}
+
+document.getElementById('btnPause').onclick = function () {
+  paused = !paused;
+  this.textContent = paused ? '恢复实时' : '暂停实时';
+  this.classList.toggle('active', paused);
+};
+document.getElementById('btnRefresh').onclick = () => { loadHistory(); loadStats(); };
+document.getElementById('btnCloseDrawer').onclick = closeDrawer;
+document.getElementById('drawerMask').onclick = closeDrawer;
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+
+loadHistory();
+loadStats();
+connect();
+setInterval(loadStats, 20000);
+</script>
+</body>
+</html>
